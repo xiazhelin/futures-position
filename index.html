@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>期货持仓分析</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+<style>
+:root{
+  --bg:#f6f5f1;--panel:#fff;--ink:#1c1b19;--mute:#77736b;--line:#e4e1d9;--grid:#eeece6;
+  --accent:#d8261c;--up:#d8261c;--down:#1a8a55;--chip:#efede7;
+  --y0:#e9c9a8;--y1:#b9c9dc;--y2:#7fa6c9;--y3:#3f8fa8;--y4:#6b3fa0;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#141413;--panel:#1d1d1b;--ink:#ece9e2;--mute:#9a958b;--line:#33312d;--grid:#2a2926;
+  --accent:#ff5a4d;--up:#ff5a4d;--down:#3fc487;--chip:#2a2926;
+  --y0:#6b5540;--y1:#4a596b;--y2:#4f7ea8;--y3:#3fa3bf;--y4:#a07be0;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif}
+.wrap{max-width:1240px;margin:0 auto;padding:24px 16px 48px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding-bottom:14px}
+h1{font-size:22px;margin:0;letter-spacing:.02em}
+.sub{color:var(--mute);font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.06em}
+.chips{display:flex;flex-wrap:wrap;gap:6px 6px;margin:16px 0;align-items:center}
+.chips .grp{color:var(--mute);font-size:12px;margin:0 4px 0 10px}
+.chips .grp:first-child{margin-left:0}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:5px 12px;border-radius:3px;cursor:pointer;font:inherit;font-size:13px}
+.chip b{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:600;margin-right:5px}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.kpi{background:var(--panel);border:1px solid var(--line);padding:12px 14px}
+.kpi .l{color:var(--mute);font-size:12px}
+.kpi .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+.kpi .n{font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}
+.up{color:var(--up)}.down{color:var(--down)}
+.panel{background:var(--panel);border:1px solid var(--line);margin-top:12px;padding:16px}
+.panel h2{font-size:16px;margin:0}
+.panel .sub{margin-top:2px}
+.chart{width:100%;height:440px}
+.chart.sm{height:300px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.two .panel{min-width:0}
+.tblwrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;margin-top:10px;min-width:760px}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--grid);white-space:nowrap}
+th{color:var(--mute);font-weight:500;font-size:12px}
+th:first-child,td:first-child{text-align:left}
+tbody tr{cursor:pointer}
+tbody tr:hover,tbody tr.on{background:var(--chip)}
+.bar{display:inline-block;width:70px;height:6px;background:var(--grid);vertical-align:middle;margin-right:8px;position:relative}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}
+footer{color:var(--mute);font-size:12px;margin-top:16px;line-height:1.7}
+@media (max-width:820px){.kpis{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}.chart{height:340px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>期货持仓分析</h1><div class="sub">DAILY OPEN INTEREST · 单边 · 手</div></div>
+    <div class="sub" id="asof">加载中…</div>
+  </header>
+  <div class="chips" id="chips"></div>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="panel">
+    <h2 id="t1"></h2><div class="sub">DAILY SEASONAL / RECENT 6 YEARS · 点击图例可隐藏年份</div>
+    <div class="chart" id="cSeason"></div>
+  </div>
+  <div class="two">
+    <div class="panel">
+      <h2>历史走势</h2><div class="sub">FULL HISTORY · 拖动下方滑块缩放</div>
+      <div class="chart sm" id="cHist"></div>
+    </div>
+    <div class="panel">
+      <h2>持仓日变化</h2><div class="sub">DAILY CHANGE · 近 120 个交易日</div>
+      <div class="chart sm" id="cChg"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>全品种概览</h2><div class="sub">OVERVIEW · 点击行切换品种</div>
+    <div class="tblwrap"><table id="tbl"></table></div>
+  </div>
+  <footer id="foot"></footer>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt=v=>v==null?'–':Math.round(v).toLocaleString('en-US');
+const sgn=v=>v==null?'–':(v>0?'+':'')+Math.round(v).toLocaleString('en-US');
+const pct=v=>v==null?'–':(v>0?'+':'')+(v*100).toFixed(1)+'%';
+const cls=v=>v>0?'up':v<0?'down':'';
+let D,cur='RU',charts={};
+
+fetch('data/positions.json?t='+Date.now()).then(r=>r.json()).then(d=>{
+  D=d;
+  // 合成品种：RU+NR
+  const ru=d.series.RU,nr=d.series.NR;
+  d.series['RU+NR']=ru.map((v,i)=>v==null?null:v+(nr[i]||0));
+  d.varieties.splice(3,0,{code:'RU+NR',name:'RU+NR合计',exchange:'SHFE/INE',group:'橡胶',source:'上期所日行情'});
+  d.stats={};d.varieties.forEach(v=>d.stats[v.code]=stats(v.code));
+  buildChips();buildTable();render();
+  $('asof').textContent='最新数据 '+d.dates[d.dates.length-1]+' · 更新于 '+d.updated;
+  $('foot').innerHTML='数据来源：上期所/上期能源品种取自交易所官方日行情（分合约持仓加总，与钢联口径一致）；大商所品种自动更新部分取自新浪财经分合约持仓加总，当日无成交的远月合约可能缺失，与官方值偏差通常小于 1%。历史数据由钢联导出初始化。<br>分位：最新持仓在近 5 年全部日度值中的百分位。同比：对比去年同期最近一个交易日。';
+}).catch(e=>{$('asof').textContent='数据加载失败：'+e.message});
+
+function pts(code){const s=D.series[code],o=[];D.dates.forEach((dt,i)=>{if(s[i]!=null)o.push([dt,s[i]])});return o}
+function stats(code){
+  const p=pts(code),n=p.length,last=p[n-1],back=k=>n>k?p[n-1-k][1]:null;
+  const d1=back(1),d5=back(5),d20=back(20);
+  const ly=(+last[0].slice(0,4)-1)+last[0].slice(4);
+  let yv=null;for(let i=n-1;i>=0;i--){if(p[i][0]<=ly){yv=p[i][1];break}}
+  const from=(+last[0].slice(0,4)-5)+last[0].slice(4);
+  const w=p.filter(x=>x[0]>=from).map(x=>x[1]);
+  const q=w.filter(x=>x<=last[1]).length/w.length;
+  return{date:last[0],last:last[1],c1:d1==null?null:last[1]-d1,c5:d5==null?null:last[1]-d5,c20:d20==null?null:last[1]-d20,
+    p1:d1?last[1]/d1-1:null,p5:d5?last[1]/d5-1:null,yoy:yv?last[1]/yv-1:null,q,hi:Math.max(...w),lo:Math.min(...w)};
+}
+function buildChips(){
+  let h='',g='';
+  D.varieties.forEach(v=>{if(v.group!==g){g=v.group;h+=`<span class="grp">${g}</span>`}
+    h+=`<button class="chip" data-c="${v.code}"><b>${v.code}</b>${v.name.replace('RU+NR','')}</button>`});
+  $('chips').innerHTML=h;
+  $('chips').onclick=e=>{const b=e.target.closest('.chip');if(b){cur=b.dataset.c;render()}};
+}
+function buildTable(){
+  let h='<thead><tr><th>品种</th><th>交易所</th><th>最新持仓</th><th>日变化</th><th>5日变化</th><th>20日变化</th><th>同比</th><th>近5年分位</th></tr></thead><tbody>';
+  D.varieties.forEach(v=>{const s=D.stats[v.code];
+    h+=`<tr data-c="${v.code}"><td><b>${v.code}</b> ${v.name.replace('RU+NR','')}</td><td>${v.exchange}</td><td>${fmt(s.last)}</td>
+    <td class="${cls(s.c1)}">${sgn(s.c1)}</td><td class="${cls(s.c5)}">${sgn(s.c5)}</td><td class="${cls(s.c20)}">${sgn(s.c20)}</td>
+    <td class="${cls(s.yoy)}">${pct(s.yoy)}</td><td><span class="bar"><i style="width:${(s.q*100).toFixed(0)}%"></i></span>${(s.q*100).toFixed(0)}%</td></tr>`});
+  $('tbl').innerHTML=h+'</tbody>';
+  $('tbl').onclick=e=>{const r=e.target.closest('tr[data-c]');if(r){cur=r.dataset.c;render();window.scrollTo({top:0,behavior:'smooth'})}};
+}
+function chart(id){return charts[id]||(charts[id]=echarts.init($(id)))}
+function render(){
+  const v=D.varieties.find(x=>x.code===cur),s=D.stats[cur],p=pts(cur);
+  document.querySelectorAll('.chip').forEach(b=>b.classList.toggle('on',b.dataset.c===cur));
+  document.querySelectorAll('#tbl tbody tr').forEach(r=>r.classList.toggle('on',r.dataset.c===cur));
+  $('t1').textContent=`${cur} · ${v.name.replace('RU+NR','')} · 总持仓季节性`;
+  $('kpis').innerHTML=[
+    ['最新持仓',fmt(s.last),s.date,''],
+    ['日变化',sgn(s.c1),pct(s.p1),cls(s.c1)],
+    ['5日变化',sgn(s.c5),pct(s.p5),cls(s.c5)],
+    ['同比',pct(s.yoy),'对比去年同期',cls(s.yoy)],
+    ['近5年分位',(s.q*100).toFixed(0)+'%','区间 '+fmt(s.lo)+' ~ '+fmt(s.hi),''],
+  ].map(k=>`<div class="kpi"><div class="l">${k[0]}</div><div class="v ${k[3]}">${k[1]}</div><div class="n">${k[2]}</div></div>`).join('');
+
+  const ink=css('--ink'),mute=css('--mute'),grid=css('--grid'),acc=css('--accent');
+  const axis={axisLine:{lineStyle:{color:grid}},axisLabel:{color:mute,fontSize:11},splitLine:{lineStyle:{color:grid}},axisTick:{show:false}};
+  const tip={trigger:'axis',backgroundColor:css('--panel'),borderColor:css('--line'),textStyle:{color:ink,fontSize:12}};
+  const yfmt=x=>x>=1e4?(x/1e4)+'万':x;
+
+  // 季节图
+  const years=[...new Set(p.map(x=>x[0].slice(0,4)))].slice(-6);
+  const pal=['--y0','--y1','--y2','--y3','--y4'].map(css).slice(-(years.length-1));
+  const ser=years.map((y,i)=>{const isCur=i===years.length-1;
+    return{name:y,type:'line',showSymbol:false,connectNulls:true,z:isCur?5:2,
+      lineStyle:{width:isCur?3:1.5,color:isCur?acc:pal[i]},itemStyle:{color:isCur?acc:pal[i]},
+      data:p.filter(x=>x[0].slice(0,4)===y).map(x=>['2000'+x[0].slice(4),x[1]])}});
+  chart('cSeason').setOption({animation:false,grid:{left:56,right:20,top:40,bottom:30},
+    legend:{type:'scroll',top:0,left:0,right:0,icon:'rect',itemWidth:16,itemHeight:2,textStyle:{color:mute}},
+    tooltip:{...tip,formatter:a=>a[0].axisValueLabel.slice(5)+'<br>'+a.map(x=>`${x.marker}${x.seriesName}　<b>${fmt(x.value[1])}</b>`).join('<br>')},
+    xAxis:{type:'time',min:'2000-01-01',max:'2000-12-31',...axis,splitLine:{show:true,lineStyle:{color:grid}},
+      axisLabel:{color:mute,fontSize:11,formatter:t=>(new Date(t).getMonth()+1)+'月'},splitNumber:12,minInterval:28*864e5},
+    yAxis:{type:'value',scale:true,...axis,axisLabel:{color:mute,fontSize:11,formatter:yfmt}},
+    series:ser},true);
+
+  // 历史
+  chart('cHist').setOption({animation:false,grid:{left:56,right:16,top:14,bottom:64},tooltip:{...tip,valueFormatter:fmt},
+    xAxis:{type:'time',...axis,splitLine:{show:false}},
+    yAxis:{type:'value',scale:true,...axis,axisLabel:{color:mute,fontSize:11,formatter:yfmt}},
+    dataZoom:[{type:'inside'},{type:'slider',height:20,bottom:10,borderColor:grid,textStyle:{color:mute},startValue:p[Math.max(0,p.length-500)][0]}],
+    series:[{name:'持仓量',type:'line',showSymbol:false,data:p,lineStyle:{width:1.5,color:css('--y3')},itemStyle:{color:css('--y3')},
+      areaStyle:{color:css('--y3'),opacity:.08}}]},true);
+
+  // 日变化
+  const chg=[];for(let i=Math.max(1,p.length-120);i<p.length;i++)chg.push([p[i][0],p[i][1]-p[i-1][1]]);
+  chart('cChg').setOption({animation:false,grid:{left:56,right:16,top:14,bottom:30},tooltip:{...tip,valueFormatter:sgn},
+    xAxis:{type:'category',data:chg.map(x=>x[0]),...axis,splitLine:{show:false},axisLabel:{color:mute,fontSize:11,formatter:t=>t.slice(5)}},
+    yAxis:{type:'value',...axis,axisLabel:{color:mute,fontSize:11,formatter:x=>Math.abs(x)>=1e4?(x/1e4)+'万':x}},
+    series:[{name:'日变化',type:'bar',data:chg.map(x=>({value:x[1],itemStyle:{color:x[1]>=0?css('--up'):css('--down')}}))}]},true);
+}
+addEventListener('resize',()=>Object.values(charts).forEach(c=>c.resize()));
+matchMedia('(prefers-color-scheme:dark)').addEventListener('change',()=>D&&render());
+</script>
+</body>
+</html>
